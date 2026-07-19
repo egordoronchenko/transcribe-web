@@ -123,8 +123,9 @@ class Transcriber:
             kwargs["language"] = self.cfg.language
         if self.cfg.prompt:
             kwargs["prompt"] = self.cfg.prompt[:800]
-        extra = {
-            "extra_body": {
+        extra = {}
+        if "openrouter" in self.cfg.base_url.lower():
+            extra["extra_body"] = {
                 "provider": {
                     "order": ["groq", "together"],
                     "allow_fallbacks": True,
@@ -133,7 +134,6 @@ class Transcriber:
                     },
                 }
             }
-        }
         try:
             result = await self.client.audio.transcriptions.create(**kwargs, **extra)
         finally:
