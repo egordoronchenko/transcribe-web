@@ -1,0 +1,9 @@
+services:
+  transcribe-web:
+    build: .
+    env_file: .env
+    ports:
+      - "${PORT:-8080}:8080"
+    volumes:
+      - "${HOST_ROOT:?Задай HOST_ROOT в .env}:/host/root"
+    restart: unless-stopped

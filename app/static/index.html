@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TRANSCRIBE://WEB</title>
+<style>
+  :root {
+    --bg:#05080d; --panel:#0a1017; --panel2:#0d151f; --line:#16222e; --line2:#1f3242;
+    --text:#c8d6e5; --muted:#5c7387; --dim:#3b4d5e;
+    --cyan:#2de2e6; --cyan-soft:rgba(45,226,230,.12); --cyan-glow:rgba(45,226,230,.25);
+    --green:#3ddc84; --amber:#f2a33c; --red:#ff3864; --violet:#b967ff;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; color:var(--text);
+    font-family:"Cascadia Mono","JetBrains Mono",Consolas,ui-monospace,monospace;
+    font-size:14px; background:var(--bg);
+    background-image:
+      radial-gradient(ellipse 80% 50% at 50% -10%, rgba(45,226,230,.06), transparent),
+      repeating-linear-gradient(0deg, transparent 0 2px, rgba(255,255,255,.012) 2px 4px);
+    min-height:100vh;
+  }
+  .wrap { max-width:none; margin:0 auto; padding:28px 44px 70px; }
+  .cols { display:grid; grid-template-columns:minmax(0,1fr); gap:0 26px; }
+  @media (min-width:1150px) {
+    .cols { grid-template-columns:minmax(0,10fr) minmax(0,9fr); align-items:start; }
+    .filelist { max-height:46vh; }
+    .log { max-height:52vh; }
+    body { font-size:14.5px; }
+  }
+  header { display:flex; align-items:center; justify-content:space-between; margin-bottom:26px;
+           border-bottom:1px solid var(--line); padding-bottom:16px; }
+  h1 { font-size:20px; font-weight:600; margin:0; letter-spacing:.06em; color:#e8f6f7; }
+  h1 .proto { color:var(--cyan); text-shadow:0 0 12px var(--cyan-glow); }
+  h1 .cursor { display:inline-block; width:9px; height:18px; background:var(--cyan);
+               margin-left:6px; vertical-align:-2px; animation:blink 1.1s steps(1) infinite;
+               box-shadow:0 0 8px var(--cyan-glow); }
+  @keyframes blink { 50% { opacity:0; } }
+  .badge { font-size:11px; letter-spacing:.08em; padding:5px 12px; border:1px solid; border-radius:3px; }
+  .badge .dot { display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:7px; vertical-align:1px; }
+  .badge.ok { color:var(--green); border-color:rgba(61,220,132,.4); background:rgba(61,220,132,.07); }
+  .badge.ok .dot { background:var(--green); box-shadow:0 0 8px var(--green); animation:pulse 2s infinite; }
+  .badge.err { color:var(--red); border-color:rgba(255,56,100,.4); background:rgba(255,56,100,.07); }
+  .badge.err .dot { background:var(--red); box-shadow:0 0 8px var(--red); }
+  @keyframes pulse { 50% { opacity:.4; } }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:6px;
+          padding:16px 18px; margin-bottom:16px; position:relative;
+          animation:reveal .4s ease both; }
+  .card::before { content:""; position:absolute; top:-1px; left:16px; width:34px; height:1px;
+                  background:var(--cyan); box-shadow:0 0 10px var(--cyan-glow); }
+  @keyframes reveal { from { opacity:0; transform:translateY(6px); } }
+  .card h2 { font-size:11px; font-weight:600; color:var(--cyan); margin:0 0 12px;
+             letter-spacing:.18em; text-transform:uppercase; }
+  .card h2::before { content:"// "; color:var(--dim); }
+  .pathline { display:flex; align-items:center; gap:12px; }
+  .pathline code { flex:1; font-size:13px; word-break:break-all; color:var(--text); }
+  .pathline code.muted { color:var(--muted); }
+  button { font:inherit; font-size:12px; letter-spacing:.06em; padding:7px 16px; cursor:pointer;
+           color:var(--text); background:var(--panel2); border:1px solid var(--line2); border-radius:3px;
+           transition:border-color .15s, box-shadow .15s, color .15s; }
+  button:hover:not(:disabled) { border-color:var(--cyan); color:var(--cyan);
+                                box-shadow:0 0 12px var(--cyan-glow), inset 0 0 12px rgba(45,226,230,.05); }
+  button:disabled { opacity:.35; cursor:default; }
+  button.primary { color:#02110f; background:var(--cyan); border-color:var(--cyan); font-weight:600;
+                   box-shadow:0 0 16px var(--cyan-glow); }
+  button.primary:hover:not(:disabled) { color:#02110f; background:#4ceef1; box-shadow:0 0 22px var(--cyan-glow); }
+  button.danger { color:var(--red); border-color:rgba(255,56,100,.45); }
+  button.danger:hover:not(:disabled) { border-color:var(--red); color:var(--red);
+                                       box-shadow:0 0 12px rgba(255,56,100,.25); }
+  .browser { border:1px solid var(--line); border-radius:4px; margin-top:12px; max-height:270px; overflow:auto;
+             background:var(--panel2); }
+  .browser .bpath { padding:9px 14px; font-size:11px; color:var(--muted); border-bottom:1px solid var(--line);
+                    display:flex; justify-content:space-between; gap:8px; align-items:center;
+                    position:sticky; top:0; background:var(--panel); z-index:1; letter-spacing:.04em; }
+  .browser .dir { padding:8px 14px; font-size:13px; cursor:pointer; border-bottom:1px solid rgba(22,34,46,.6); }
+  .browser .dir:hover { background:var(--cyan-soft); color:var(--cyan); }
+  .filelist { max-height:300px; overflow:auto; border:1px solid var(--line); border-radius:4px;
+              margin-top:12px; background:var(--panel2); }
+  .filelist label { display:flex; gap:10px; align-items:center; padding:7px 14px; font-size:12.5px;
+                    border-bottom:1px solid rgba(22,34,46,.6); cursor:pointer; }
+  .filelist label:hover { background:var(--cyan-soft); }
+  .filelist .kind { font-size:10px; color:var(--dim); margin-left:auto; white-space:nowrap;
+                    border:1px solid var(--line2); padding:1px 7px; border-radius:2px; letter-spacing:.08em; }
+  input[type=checkbox] { accent-color:var(--cyan); width:14px; height:14px; }
+  textarea { width:100%; font:inherit; font-size:12.5px; padding:10px 12px; color:var(--text);
+             background:var(--panel2); border:1px solid var(--line2); border-radius:4px; resize:vertical; }
+  textarea:focus, button:focus-visible { outline:none; border-color:var(--cyan);
+             box-shadow:0 0 0 1px var(--cyan), 0 0 14px var(--cyan-glow); }
+  .toolbar { display:flex; gap:12px; align-items:center; margin-top:12px; font-size:12px; flex-wrap:wrap; }
+  .toolbar .spacer { flex:1; }
+  .muted { color:var(--muted); font-size:12px; }
+  .hint { color:var(--dim); font-size:11px; margin-top:8px; letter-spacing:.02em; }
+  .progress { height:5px; background:var(--panel2); border:1px solid var(--line); border-radius:3px;
+              overflow:hidden; margin:10px 0 6px; }
+  .progress > div { height:100%; background:linear-gradient(90deg, var(--cyan), #4ceef1);
+                    box-shadow:0 0 12px var(--cyan-glow); transition:width .3s; }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th { text-align:left; font-size:10px; color:var(--muted); font-weight:600; padding:7px 10px;
+       letter-spacing:.14em; text-transform:uppercase; border-bottom:1px solid var(--line2); }
+  td { padding:7px 10px; border-bottom:1px solid rgba(22,34,46,.6); vertical-align:top; }
+  td.file { font-size:12px; word-break:break-all; color:var(--text); }
+  .st-ok { color:var(--green); text-shadow:0 0 10px rgba(61,220,132,.35); }
+  .st-err { color:var(--red); text-shadow:0 0 10px rgba(255,56,100,.3); }
+  .st-warn { color:var(--amber); }
+  .st-run { color:var(--cyan); text-shadow:0 0 10px var(--cyan-glow); }
+  .st-muted { color:var(--muted); }
+  .log { background:#04070b; color:#9fb6c8; font-size:12px; line-height:1.75; border:1px solid var(--line);
+         border-radius:4px; padding:12px 16px; max-height:230px; overflow:auto;
+         white-space:pre-wrap; word-break:break-all; }
+  .log::first-line { color:var(--green); }
+  .hidden { display:none; }
+  footer { margin-top:34px; text-align:center; color:var(--dim); font-size:10px; letter-spacing:.2em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><span class="proto">TRANSCRIBE://</span>WEB<span class="cursor"></span></h1>
+    <span id="keyBadge" class="badge err"><span class="dot"></span>SCANNING…</span>
+  </header>
+
+  <div class="cols">
+  <div>
+
+  <div class="card">
+    <h2>Источник</h2>
+    <div class="pathline">
+      <code id="srcPath" class="muted">папка не выбрана</code>
+      <button id="srcBtn">Выбрать</button>
+    </div>
+    <div id="srcBrowser" class="browser hidden"></div>
+    <div id="fileBlock" class="hidden">
+      <div class="toolbar">
+        <span id="fileCounts" class="muted"></span>
+        <span class="spacer"></span>
+        <button id="selAll">Выбрать все</button>
+        <button id="selNone">Снять все</button>
+      </div>
+      <div id="fileList" class="filelist"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Выход</h2>
+    <div class="pathline">
+      <code id="outPath" class="muted">папка не выбрана</code>
+      <button id="outBtn">Выбрать</button>
+    </div>
+    <div id="outBrowser" class="browser hidden"></div>
+    <div class="hint">в выходной папке будет создана папка transcripts: внутри — подпапка на каждый файл со всеми его результатами; структура подпапок источника сохраняется</div>
+  </div>
+
+  <div class="card">
+    <h2>Подсказка распознавания</h2>
+    <textarea id="promptText" rows="4"
+      placeholder="Термины и имена, которые Whisper должен узнавать…"></textarea>
+    <div class="toolbar" style="margin-top:8px">
+      <span class="muted" id="promptLen"></span>
+      <span class="spacer"></span>
+      <button id="promptReset">Вернуть по умолчанию</button>
+    </div>
+    <div class="hint">действует на текущее задание · пустое поле — подсказка по умолчанию · в API уходят первые 800 символов</div>
+  </div>
+
+  <div class="card">
+    <div class="toolbar" style="margin-top:0">
+      <label style="display:flex;gap:8px;align-items:center;cursor:pointer">
+        <input type="checkbox" id="force"> force — перезаписать уже готовые
+      </label>
+      <span class="spacer"></span>
+      <button id="startBtn" class="primary" disabled>▶ СТАРТ</button>
+      <button id="cancelSoftBtn" class="danger hidden">Отменить после файла</button>
+      <button id="cancelHardBtn" class="danger hidden">Прервать сейчас</button>
+    </div>
+  </div>
+
+  </div>
+  <div>
+
+  <div id="jobCard" class="card hidden">
+    <h2>Задание</h2>
+    <div id="jobLine" style="font-size:12.5px"></div>
+    <div class="progress"><div id="bar" style="width:0%"></div></div>
+    <div id="jobSummary" class="muted"></div>
+    <div style="overflow-x:auto; margin-top:12px">
+      <table>
+        <thead><tr><th style="width:55%">Файл</th><th>Статус</th><th style="text-align:right">Время</th></tr></thead>
+        <tbody id="jobTable"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Лог</h2>
+    <div id="log" class="log">system idle — ожидание задания…</div>
+  </div>
+
+  </div>
+  </div>
+
+  <footer>TRANSCRIBE://WEB · OPENROUTER WHISPER · RAW OUTPUT, NO POLISH</footer>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const state = { source: null, output: null, files: [], selected: new Set(), job: null, running: false };
+
+const STATUS_LABELS = {
+  queued: ["в очереди", "st-muted"], extracting: ["извлекаю звук", "st-run"],
+  transcribing: ["в работе", "st-run"], ok: ["готово", "st-ok"], skip: ["пропущен", "st-muted"],
+  error: ["ошибка", "st-err"], no_audio: ["нет аудио", "st-warn"], cancelled: ["отменён", "st-muted"],
+};
+const JOB_LABELS = { running: "выполняется", cancelling: "отменяется…", done: "завершено",
+  partial: "завершено с ошибками", failed: "не выполнено", cancelled: "отменено" };
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  if (!r.ok) {
+    let msg = r.statusText;
+    try { msg = (await r.json()).detail || msg; } catch (e) {}
+    throw new Error(msg);
+  }
+  return r.json();
+}
+const enc = s => encodeURIComponent(s);
+
+let promptDefault = "";
+async function refreshStatus() {
+  const s = await api("/api/status");
+  const b = $("keyBadge");
+  b.innerHTML = '<span class="dot"></span>' + (s.key_present ? "API-КЛЮЧ · ONLINE" : "API-КЛЮЧ · НЕ НАЙДЕН");
+  b.className = "badge " + (s.key_present ? "ok" : "err");
+  b.title = "Модель: " + s.model + " · язык: " + s.language;
+  promptDefault = s.prompt_default || "";
+  if (!$("promptText").value) $("promptText").value = promptDefault;
+  updatePromptLen();
+}
+function updatePromptLen() {
+  const n = $("promptText").value.length;
+  $("promptLen").textContent = n + " символов" + (n > 800 ? " — лишнее будет обрезано" : "");
+  $("promptLen").style.color = n > 800 ? "var(--red)" : "";
+}
+$("promptText").addEventListener("input", updatePromptLen);
+$("promptReset").onclick = () => { $("promptText").value = promptDefault; updatePromptLen(); };
+
+function makeBrowser(el, onPick) {
+  let cur = "";
+  async function render() {
+    const data = await api("/api/tree?path=" + enc(cur));
+    el.innerHTML = "";
+    const head = document.createElement("div");
+    head.className = "bpath";
+    const label = document.createElement("span");
+    label.textContent = "/host/root/" + cur;
+    const btns = document.createElement("span");
+    btns.style.cssText = "display:flex;gap:8px";
+    const up = document.createElement("button");
+    up.textContent = "Вверх";
+    up.disabled = cur === "";
+    up.onclick = () => { cur = cur.split("/").slice(0, -1).join("/"); render(); };
+    const pick = document.createElement("button");
+    pick.textContent = "Выбрать эту папку";
+    pick.className = "primary";
+    pick.onclick = () => { el.classList.add("hidden"); onPick(cur); };
+    btns.append(up, pick);
+    head.append(label, btns);
+    el.append(head);
+    if (!data.dirs.length) {
+      const d = document.createElement("div");
+      d.className = "dir"; d.style.color = "var(--dim)"; d.style.cursor = "default";
+      d.textContent = "∅ нет подпапок";
+      el.append(d);
+    }
+    for (const name of data.dirs) {
+      const d = document.createElement("div");
+      d.className = "dir";
+      d.textContent = "▸ " + name;
+      d.onclick = () => { cur = cur ? cur + "/" + name : name; render(); };
+      el.append(d);
+    }
+  }
+  return { open(start) { cur = start || ""; el.classList.remove("hidden"); render(); } };
+}
+
+const srcBrowser = makeBrowser($("srcBrowser"), async rel => {
+  state.source = rel;
+  $("srcPath").textContent = "/host/root/" + rel;
+  $("srcPath").classList.remove("muted");
+  await loadFiles();
+  updateStartBtn();
+});
+const outBrowser = makeBrowser($("outBrowser"), rel => {
+  state.output = rel;
+  $("outPath").textContent = "/host/root/" + rel;
+  $("outPath").classList.remove("muted");
+  updateStartBtn();
+});
+$("srcBtn").onclick = () => srcBrowser.open(state.source || "");
+$("outBtn").onclick = () => outBrowser.open(state.output || "");
+
+async function loadFiles() {
+  const data = await api("/api/scan?path=" + enc(state.source));
+  state.files = data.files;
+  state.selected = new Set(data.files.map(f => f.path));
+  const list = $("fileList");
+  list.innerHTML = "";
+  for (const f of data.files) {
+    const label = document.createElement("label");
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.checked = true;
+    cb.onchange = () => {
+      cb.checked ? state.selected.add(f.path) : state.selected.delete(f.path);
+      updateCounts(); updateStartBtn();
+    };
+    const name = document.createElement("span");
+    name.textContent = f.path;
+    const kind = document.createElement("span");
+    kind.className = "kind";
+    kind.textContent = f.kind === "video" ? "VIDEO" : "AUDIO";
+    label.append(cb, name, kind);
+    label.dataset.path = f.path;
+    list.append(label);
+  }
+  $("fileBlock").classList.remove("hidden");
+  updateCounts();
+}
+function updateCounts() {
+  $("fileCounts").textContent =
+    `выбрано ${state.selected.size} из ${state.files.length}`;
+}
+$("selAll").onclick = () => {
+  state.selected = new Set(state.files.map(f => f.path));
+  $("fileList").querySelectorAll("input").forEach(cb => cb.checked = true);
+  updateCounts(); updateStartBtn();
+};
+$("selNone").onclick = () => {
+  state.selected.clear();
+  $("fileList").querySelectorAll("input").forEach(cb => cb.checked = false);
+  updateCounts(); updateStartBtn();
+};
+
+function updateStartBtn() {
+  $("startBtn").disabled = state.running || !state.source || !state.output || state.selected.size === 0;
+}
+
+$("startBtn").onclick = async () => {
+  try {
+    await api("/api/job", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        source: state.source, output: state.output,
+        files: state.files.map(f => f.path).filter(p => state.selected.has(p)),
+        force: $("force").checked,
+        prompt: $("promptText").value,
+      }),
+    });
+  } catch (e) { alert("Не удалось запустить: " + e.message); }
+};
+$("cancelSoftBtn").onclick = () => api("/api/job/cancel", { method: "POST",
+  headers: { "Content-Type": "application/json" }, body: JSON.stringify({ hard: false }) });
+$("cancelHardBtn").onclick = () => api("/api/job/cancel", { method: "POST",
+  headers: { "Content-Type": "application/json" }, body: JSON.stringify({ hard: true }) });
+
+function fmtTime(sec) {
+  if (sec == null) return "—";
+  const m = Math.floor(sec / 60), s = Math.round(sec % 60);
+  return m + ":" + String(s).padStart(2, "0");
+}
+
+function renderJob(job) {
+  state.job = job;
+  state.running = job && (job.status === "running" || job.status === "cancelling");
+  const runBtns = state.running;
+  $("cancelSoftBtn").classList.toggle("hidden", !runBtns);
+  $("cancelHardBtn").classList.toggle("hidden", !runBtns);
+  updateStartBtn();
+  if (!job) { $("jobCard").classList.add("hidden"); return; }
+  $("jobCard").classList.remove("hidden");
+
+  const total = job.files.length;
+  const finished = job.files.filter(f => ["ok", "skip", "error", "no_audio", "cancelled"].includes(f.status)).length;
+  const cur = job.files[job.current_index];
+  let line = `Статус: ${JOB_LABELS[job.status] || job.status}`;
+  let frac = total ? finished / total : 0;
+  if (cur && state.running) {
+    line = `Файл ${job.current_index + 1} из ${total} · ${cur.path}`;
+    if (cur.chunks_total) {
+      line += ` · чанк ${cur.chunks_done}/${cur.chunks_total}`;
+      frac = (finished + cur.chunks_done / cur.chunks_total) / total;
+    }
+  }
+  $("jobLine").textContent = line;
+  $("bar").style.width = Math.round(frac * 100) + "%";
+
+  const counts = {};
+  for (const f of job.files) counts[f.status] = (counts[f.status] || 0) + 1;
+  $("jobSummary").textContent = Object.entries(counts)
+    .map(([k, v]) => `${(STATUS_LABELS[k] || [k])[0]}: ${v}`).join(" · ");
+
+  const tbody = $("jobTable");
+  tbody.innerHTML = "";
+  for (const f of job.files) {
+    const tr = document.createElement("tr");
+    const [label, cls] = STATUS_LABELS[f.status] || [f.status, ""];
+    const tdF = document.createElement("td"); tdF.className = "file"; tdF.textContent = f.path;
+    const tdS = document.createElement("td");
+    const span = document.createElement("span"); span.className = cls; span.textContent = label;
+    if (f.error) span.title = f.error;
+    tdS.append(span);
+    if (f.status === "transcribing" && f.chunks_total)
+      tdS.append(" " + f.chunks_done + "/" + f.chunks_total);
+    const tdT = document.createElement("td"); tdT.style.textAlign = "right";
+    tdT.textContent = fmtTime(f.wall_clock_sec);
+    tr.append(tdF, tdS, tdT);
+    tbody.append(tr);
+  }
+}
+
+const logEl = $("log");
+let logEmpty = true;
+function addLog(line) {
+  if (logEmpty) { logEl.textContent = ""; logEmpty = false; }
+  logEl.textContent += line + "\n";
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function connectSSE() {
+  const es = new EventSource("/api/events");
+  es.onmessage = ev => {
+    const e = JSON.parse(ev.data);
+    if (e.type === "state") renderJob(e.state);
+    else if (e.type === "log") addLog(e.line);
+  };
+  es.onerror = () => { es.close(); setTimeout(connectSSE, 3000); };
+}
+
+refreshStatus();
+connectSSE();
+</script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+fastapi>=0.110
+uvicorn>=0.29
+openai>=1.30
+pydub>=0.25
+tenacity>=8.2
