@@ -85,6 +85,7 @@ docker compose up -d --build
 | Провайдер | `OPENAI_BASE_URL` | `WHISPER_MODEL` |
 | --- | --- | --- |
 | OpenRouter (default) | `https://openrouter.ai/api/v1` | `openai/whisper-large-v3` |
+| [RouterAI](https://routerai.ru) | `https://routerai.ru/api/v1` | `openai/whisper-large-v3` |
 | Groq напрямую | `https://api.groq.com/openai/v1` | `whisper-large-v3` |
 | OpenAI | `https://api.openai.com/v1` | `whisper-1` |
 | Локальный Whisper-сервер ([speaches](https://github.com/speaches-ai/speaches) и т.п.) | `http://host.docker.internal:8000/v1` | по настройке сервера |
@@ -92,6 +93,10 @@ docker compose up -d --build
 Ключ кладётся в ту же переменную `OPENROUTER_API_KEY` (имя историческое — принимается
 ключ любого провайдера). Требование к модели одно: поддержка
 `response_format=verbose_json` с таймкодами сегментов — на них строятся srt и json.
+
+OpenRouter и RouterAI проверены на реальном 35-минутном файле: скорость одинаковая
+(~32 с на whisper-large-v3), но RouterAI отдаёт более крупные сегменты (~190 против
+~260) — субтитры srt получаются длиннее и реже.
 OpenRouter-специфичные настройки роутинга (предпочтение Groq) применяются только
 когда база указывает на OpenRouter.
 
