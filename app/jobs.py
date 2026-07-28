@@ -10,7 +10,7 @@ import time
 from collections import deque
 from pathlib import Path
 
-from . import media
+from . import gemini, media
 from .core import Config, TRANSCRIPTS_DIR, transcribe_one
 
 HOST_ROOT = Path("/host/root")
@@ -63,7 +63,7 @@ class JobManager:
             self.subscribers.remove(q)
 
     def start(self, source_rel: str, output_rel: str, files: list[str], force: bool,
-              prompt: str | None = None):
+              prompt: str | None = None, mode: str = "whisper"):
         if self.running:
             raise RuntimeError("job already running")
         stems = media.assign_stems(files)
@@ -72,6 +72,7 @@ class JobManager:
             "source": source_rel,
             "output": output_rel,
             "force": force,
+            "mode": mode if mode in ("whisper", "gemini") else "whisper",
             "prompt_override": (prompt or "").strip() or None,
             "started_at": now_iso(),
             "finished_at": None,
@@ -116,7 +117,12 @@ class JobManager:
             self.log("подсказка распознавания изменена пользователем для этого задания")
         source = HOST_ROOT / st["source"]
         output = HOST_ROOT / st["output"]
-        self.log(f"задание: {len(st['files'])} файлов, модель {cfg.model}, язык {cfg.language}")
+        gemini_mode = st.get("mode") == "gemini"
+        run_one = gemini.transcribe_one if gemini_mode else transcribe_one
+        result_exts = (".txt", ".json") if gemini_mode else (".txt", ".srt", ".json")
+        self.log(f"задание: {len(st['files'])} файлов, режим "
+                 f"{'Gemini (с говорящими)' if gemini_mode else 'Whisper (дословно)'}, "
+                 f"модель {cfg.gemini_model if gemini_mode else cfg.model}, язык {cfg.language}")
 
         for i, f in enumerate(st["files"]):
             if self.cancel_soft:
@@ -129,7 +135,7 @@ class JobManager:
             out_dir = output / TRANSCRIPTS_DIR / rel_dir / stem
             t0 = time.perf_counter()
 
-            existing = [out_dir / f"{stem}{ext}" for ext in (".txt", ".srt", ".json")]
+            existing = [out_dir / f"{stem}{ext}" for ext in result_exts]
             if all(p.exists() for p in existing) and not st["force"]:
                 f["status"] = "skip"
                 self.log(f"skip (готово): {f['path']}")
@@ -153,7 +159,7 @@ class JobManager:
                     self.push_state()
 
                 with tempfile.TemporaryDirectory(prefix="chunks_") as tmp:
-                    work = asyncio.create_task(transcribe_one(
+                    work = asyncio.create_task(run_one(
                         audio_path, out_dir, stem, cfg, Path(tmp),
                         on_progress=on_progress, log=self.log,
                     ))
@@ -211,7 +217,8 @@ class JobManager:
             "status": st["status"],
             "source": f"/host/root/{st['source']}",
             "output": f"/host/root/{st['output']}/{TRANSCRIPTS_DIR}",
-            "model": cfg.model,
+            "mode": st.get("mode", "whisper"),
+            "model": cfg.gemini_model if st.get("mode") == "gemini" else cfg.model,
             "language": cfg.language,
             "force": st["force"],
             "files": [

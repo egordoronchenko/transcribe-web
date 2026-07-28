@@ -110,6 +110,14 @@
          white-space:pre-wrap; word-break:break-all; }
   .log::first-line { color:var(--green); }
   .hidden { display:none; }
+  .mode { flex:1 1 250px; display:block; padding:11px 14px; cursor:pointer; border-radius:4px;
+          background:var(--panel2); border:1px solid var(--line2); transition:border-color .15s, box-shadow .15s; }
+  .mode:hover { border-color:var(--cyan); }
+  .mode.sel { border-color:var(--cyan); box-shadow:0 0 12px var(--cyan-glow), inset 0 0 14px rgba(45,226,230,.05); }
+  .mode input { margin-right:8px; }
+  .mode b { font-weight:600; font-size:13px; }
+  .mode.sel b { color:var(--cyan); }
+  .mode span { display:block; margin-top:5px; font-size:11px; color:var(--muted); line-height:1.5; }
   @media (prefers-reduced-motion: reduce) { * { animation:none !important; transition:none !important; } }
   footer { margin-top:34px; text-align:center; color:var(--dim); font-size:10px; letter-spacing:.2em; }
 </style>
@@ -150,6 +158,21 @@
     </div>
     <div id="outBrowser" class="browser hidden"></div>
     <div class="hint">в выходной папке будет создана папка transcripts: внутри — подпапка на каждый файл со всеми его результатами; структура подпапок источника сохраняется</div>
+  </div>
+
+  <div class="card">
+    <h2>Режим</h2>
+    <div style="display:flex; gap:10px; flex-wrap:wrap">
+      <label class="mode sel" id="modeWhisperLbl">
+        <input type="radio" name="mode" value="whisper" checked><b>Whisper — дословно</b>
+        <span>точные таймкоды и .srt, без разделения говорящих · дешевле вдвое, быстрее</span>
+      </label>
+      <label class="mode" id="modeGeminiLbl">
+        <input type="radio" name="mode" value="gemini"><b>Gemini — с говорящими</b>
+        <span>реплики помечены S1, S2, S3 · таймкоды приблизительные, .srt не создаётся</span>
+      </label>
+    </div>
+    <div class="hint" id="modeHint"></div>
   </div>
 
   <div class="card">
@@ -232,7 +255,9 @@ async function refreshStatus() {
   const b = $("keyBadge");
   b.innerHTML = '<span class="dot"></span>' + (s.key_present ? "API-КЛЮЧ · ONLINE" : "API-КЛЮЧ · НЕ НАЙДЕН");
   b.className = "badge " + (s.key_present ? "ok" : "err");
-  b.title = "Модель: " + s.model + " · язык: " + s.language;
+  b.title = "Whisper: " + s.model + " · Gemini: " + s.gemini_model + " · язык: " + s.language;
+  models = { whisper: s.model, gemini: s.gemini_model || "" };
+  updateMode();
   promptDefault = s.prompt_default || "";
   if (!$("promptText").value) $("promptText").value = promptDefault;
   updatePromptLen();
@@ -244,6 +269,18 @@ function updatePromptLen() {
 }
 $("promptText").addEventListener("input", updatePromptLen);
 $("promptReset").onclick = () => { $("promptText").value = promptDefault; updatePromptLen(); };
+
+const currentMode = () => document.querySelector('input[name="mode"]:checked').value;
+let models = { whisper: "", gemini: "" };
+function updateMode() {
+  const m = currentMode();
+  $("modeWhisperLbl").classList.toggle("sel", m === "whisper");
+  $("modeGeminiLbl").classList.toggle("sel", m === "gemini");
+  $("modeHint").textContent = m === "gemini"
+    ? "модель " + models.gemini + " · записи длиннее 30 минут режутся на части, между частями нумерация говорящих может разойтись"
+    : "модель " + models.whisper + " · на записях с плохим звуком может терять фрагменты";
+}
+document.querySelectorAll('input[name="mode"]').forEach(r => r.addEventListener("change", updateMode));
 
 function makeBrowser(el, onPick) {
   let cur = "";
@@ -354,6 +391,7 @@ $("startBtn").onclick = async () => {
         files: state.files.map(f => f.path).filter(p => state.selected.has(p)),
         force: $("force").checked,
         prompt: $("promptText").value,
+        mode: currentMode(),
       }),
     });
   } catch (e) { alert("Не удалось запустить: " + e.message); }

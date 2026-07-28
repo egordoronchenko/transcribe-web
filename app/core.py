@@ -28,6 +28,7 @@ class Config:
     api_key: str
     base_url: str
     model: str
+    gemini_model: str
     language: str
     prompt: str | None
 
@@ -41,6 +42,7 @@ class Config:
             api_key=os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENAI_API_KEY") or "",
             base_url=os.environ.get("OPENAI_BASE_URL", "https://openrouter.ai/api/v1"),
             model=os.environ.get("WHISPER_MODEL", "openai/whisper-large-v3"),
+            gemini_model=os.environ.get("GEMINI_MODEL", "google/gemini-2.5-flash"),
             language=os.environ.get("LANGUAGE", "ru"),
             prompt=prompt,
         )

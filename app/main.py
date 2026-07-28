@@ -37,6 +37,7 @@ def status():
     return {
         "key_present": len(key) > 0,
         "model": os.environ.get("WHISPER_MODEL", "openai/whisper-large-v3"),
+        "gemini_model": os.environ.get("GEMINI_MODEL", "google/gemini-2.5-flash"),
         "language": os.environ.get("LANGUAGE", "ru"),
         "prompt_default": Config.from_env().prompt or "",
         "running": manager.running,
@@ -79,6 +80,7 @@ class JobRequest(BaseModel):
     files: list[str]
     force: bool = False
     prompt: str | None = None
+    mode: str = "whisper"
 
 
 @app.post("/api/job")
@@ -97,7 +99,8 @@ async def start_job(req: JobRequest):
     for rp in req.files:
         if not (src / rp).is_file():
             raise HTTPException(400, f"файл не найден: {rp}")
-    manager.start(req.source, req.output, req.files, req.force, prompt=req.prompt)
+    manager.start(req.source, req.output, req.files, req.force,
+                  prompt=req.prompt, mode=req.mode)
     return {"ok": True}
 
 

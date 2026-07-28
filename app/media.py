@@ -12,11 +12,22 @@ class NoAudioError(Exception):
     pass
 
 
+SILENCE_DB = -60.0  # ниже этого порога в дорожке нет сигнала вообще
+
+
 def scan_media(root: Path) -> list[dict]:
-    """Recursively list media files under root. Paths are relative to root, posix-style."""
+    """Recursively list media files under root. Paths are relative to root, posix-style.
+
+    Our own output directory is skipped, so a folder used as both source and
+    output does not feed extracted audio back in on the next run.
+    """
+    from .core import TRANSCRIPTS_DIR
+
     files = []
     for p in sorted(root.rglob("*")):
         if not p.is_file():
+            continue
+        if TRANSCRIPTS_DIR in p.relative_to(root).parts:
             continue
         ext = p.suffix.lower()
         if ext in VIDEO_EXTS:
@@ -60,14 +71,31 @@ def has_audio_stream(path: Path) -> bool:
     return proc.returncode == 0 and proc.stdout.strip() != ""
 
 
+def max_volume_db(path: Path) -> float:
+    """Peak level of the track. Digital silence reports about -91 dB."""
+    proc = subprocess.run(
+        ["ffmpeg", "-i", str(path), "-vn", "-af", "volumedetect", "-f", "null", "-"],
+        capture_output=True, text=True, timeout=1800,
+    )
+    for line in (proc.stderr or "").splitlines():
+        if "max_volume:" in line:
+            try:
+                return float(line.split("max_volume:")[1].strip().split()[0])
+            except (IndexError, ValueError):
+                break
+    return 0.0
+
+
 def ensure_audio(src: Path, out_dir: Path, stem: str, force: bool, log) -> Path:
     """Return an mp3 path for the pipeline. mp3 sources are used as is;
     everything else is extracted/converted to mono 64k mp3 cached in out_dir."""
     if src.suffix.lower() == ".mp3":
+        _reject_if_silent(src, log)
         return src
     cached = out_dir / f"{stem}.audio.mp3"
     if cached.exists() and not force:
         log(f"звук уже извлечён: {cached.name}")
+        _reject_if_silent(cached, log)
         return cached
     if not has_audio_stream(src):
         raise NoAudioError("файл не содержит аудиодорожки")
@@ -83,4 +111,13 @@ def ensure_audio(src: Path, out_dir: Path, stem: str, force: bool, log) -> Path:
         tail = (proc.stderr or "").strip().splitlines()[-1:] or ["ffmpeg failed"]
         raise RuntimeError(f"ffmpeg: {tail[0]}")
     tmp.replace(cached)
+    _reject_if_silent(cached, log)
     return cached
+
+
+def _reject_if_silent(path: Path, log) -> None:
+    """Guard against paying to transcribe silence: Whisper hallucinates on it."""
+    peak = max_volume_db(path)
+    if peak <= SILENCE_DB:
+        raise NoAudioError(f"в дорожке нет звука (пиковый уровень {peak:.0f} дБ)")
+    log(f"уровень звука: пик {peak:.0f} дБ")
