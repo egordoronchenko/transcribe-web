@@ -85,6 +85,9 @@
   input[type=checkbox] { accent-color:var(--cyan); width:14px; height:14px; }
   textarea { width:100%; font:inherit; font-size:12.5px; padding:10px 12px; color:var(--text);
              background:var(--panel2); border:1px solid var(--line2); border-radius:4px; resize:vertical; }
+  select { font:inherit; font-size:12.5px; padding:6px 10px; color:var(--text); cursor:pointer;
+           background:var(--panel2); border:1px solid var(--line2); border-radius:4px; }
+  select:hover { border-color:var(--cyan); }
   textarea:focus, button:focus-visible { outline:none; border-color:var(--cyan);
              box-shadow:0 0 0 1px var(--cyan), 0 0 14px var(--cyan-glow); }
   .toolbar { display:flex; gap:12px; align-items:center; margin-top:12px; font-size:12px; flex-wrap:wrap; }
@@ -190,9 +193,39 @@
     <div class="toolbar" style="margin-top:8px">
       <span class="muted" id="promptLen"></span>
       <span class="spacer"></span>
+      <button id="promptClear">Очистить</button>
       <button id="promptReset">Вернуть по умолчанию</button>
     </div>
-    <div class="hint">действует на текущее задание · пустое поле — подсказка по умолчанию · в API уходят первые 800 символов</div>
+    <div class="hint">действует на текущее задание · пустое поле — работать без подсказки · в API уходят первые 800 символов</div>
+  </div>
+
+  <div class="card">
+    <h2>Саммари</h2>
+    <label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-size:13px">
+      <input type="checkbox" id="sumNow"> сделать саммари сразу после расшифровки
+    </label>
+    <div class="toolbar">
+      <span class="muted">шаблон</span>
+      <select id="sumTemplate" style="flex:1"></select>
+    </div>
+    <textarea id="sumPrompt" rows="6" style="margin-top:10px"
+      placeholder="Что должно быть в саммари…"></textarea>
+    <div class="toolbar" style="margin-top:8px">
+      <span class="muted" id="sumHint"></span>
+      <span class="spacer"></span>
+      <button id="sumReset">Очистить / вернуть шаблон</button>
+    </div>
+
+    <div id="sumStandalone">
+      <div class="hint" style="margin:12px 0 0">саммари по уже готовым расшифровкам в выходной папке:</div>
+      <div class="toolbar">
+        <span class="muted" id="sumCounts">выбери выходную папку</span>
+        <span class="spacer"></span>
+        <button id="sumRefresh">Обновить список</button>
+        <button id="sumRun" class="primary" disabled>Сделать саммари</button>
+      </div>
+      <div id="sumList" class="filelist hidden"></div>
+    </div>
   </div>
 
   <div class="card">
@@ -269,6 +302,23 @@ async function refreshStatus() {
   promptDefault = s.prompt_default || "";
   if (!$("promptText").value) $("promptText").value = promptDefault;
   updatePromptLen();
+
+  if (!Object.keys(templates).length) {
+    templates = s.summary_templates || {};
+    summaryModel = s.summary_model || "";
+    const sel = $("sumTemplate");
+    for (const [k, v] of Object.entries(templates)) {
+      const o = document.createElement("option");
+      o.value = k; o.textContent = v.title;
+      sel.append(o);
+    }
+    const c = document.createElement("option");
+    c.value = "custom"; c.textContent = "Свой шаблон";
+    sel.append(c);
+    sel.value = "meeting";
+    fillTemplate();
+    updateSumHint();
+  }
 }
 function updatePromptLen() {
   const n = $("promptText").value.length;
@@ -277,6 +327,36 @@ function updatePromptLen() {
 }
 $("promptText").addEventListener("input", updatePromptLen);
 $("promptReset").onclick = () => { $("promptText").value = promptDefault; updatePromptLen(); };
+$("promptClear").onclick = () => { $("promptText").value = ""; updatePromptLen(); $("promptText").focus(); };
+
+let templates = {}, summaryModel = "";
+function fillTemplate() {
+  const t = templates[$("sumTemplate").value];
+  if (t) $("sumPrompt").value = t.prompt;
+}
+let customPrompt = "";
+$("sumPrompt").addEventListener("input", () => {
+  if ($("sumTemplate").value === "custom") customPrompt = $("sumPrompt").value;
+});
+$("sumTemplate").onchange = () => {
+  if ($("sumTemplate").value === "custom") {
+    $("sumPrompt").value = customPrompt;   // пусто при первом выборе, потом своё
+    $("sumPrompt").focus();
+  } else {
+    fillTemplate();
+  }
+  updateSumHint();
+};
+$("sumReset").onclick = () => {
+  if ($("sumTemplate").value === "custom") { customPrompt = ""; $("sumPrompt").value = ""; $("sumPrompt").focus(); }
+  else fillTemplate();
+};
+function updateSumHint() {
+  $("sumHint").textContent = "модель " + summaryModel + " · саммари не меняет расшифровку, кладётся рядом в summary/";
+}
+$("sumNow").onchange = () => {
+  $("sumStandalone").classList.toggle("hidden", $("sumNow").checked);
+};
 
 const currentMode = () => document.querySelector('input[name="mode"]:checked').value;
 let models = { whisper: "", gemini: "" };
@@ -346,7 +426,66 @@ const outBrowser = makeBrowser($("outBrowser"), rel => {
   $("outPath").textContent = "/host/root/" + rel;
   $("outPath").classList.remove("muted");
   updateStartBtn();
+  loadTranscripts();
 });
+
+state.summarySelected = new Set();
+async function loadTranscripts() {
+  if (!state.output) return;
+  let data;
+  try { data = await api("/api/transcripts?path=" + enc(state.output)); }
+  catch (e) { $("sumCounts").textContent = "не удалось прочитать: " + e.message; return; }
+  const list = $("sumList");
+  list.innerHTML = "";
+  state.transcripts = data.files;
+  state.summarySelected = new Set(data.files.filter(f => !f.has_summary).map(f => f.path));
+  if (!data.files.length) {
+    $("sumCounts").textContent = "расшифровок в этой папке пока нет";
+    list.classList.add("hidden");
+    updateSumBtn();
+    return;
+  }
+  for (const f of data.files) {
+    const label = document.createElement("label");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = state.summarySelected.has(f.path);
+    cb.onchange = () => {
+      cb.checked ? state.summarySelected.add(f.path) : state.summarySelected.delete(f.path);
+      updateSumBtn();
+    };
+    const name = document.createElement("span");
+    name.textContent = f.path;
+    const kind = document.createElement("span");
+    kind.className = "kind";
+    kind.textContent = (f.has_summary ? "есть саммари · " : "") + f.modes.join(", ");
+    label.append(cb, name, kind);
+    list.append(label);
+  }
+  list.classList.remove("hidden");
+  updateSumBtn();
+}
+function updateSumBtn() {
+  const n = state.summarySelected.size;
+  const total = (state.transcripts || []).length;
+  $("sumCounts").textContent = total ? `выбрано ${n} из ${total}` : "расшифровок пока нет";
+  $("sumRun").disabled = state.running || n === 0;
+}
+$("sumRefresh").onclick = loadTranscripts;
+$("sumRun").onclick = async () => {
+  try {
+    await api("/api/summary", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        output: state.output,
+        files: (state.transcripts || []).map(f => f.path).filter(p => state.summarySelected.has(p)),
+        force: $("force").checked,
+        summary_template: $("sumTemplate").value,
+        summary_prompt: $("sumPrompt").value,
+      }),
+    });
+  } catch (e) { alert("Не удалось запустить: " + e.message); }
+};
 $("srcBtn").onclick = () => srcBrowser.open(state.source || "");
 $("outBtn").onclick = () => outBrowser.open(state.output || "");
 
@@ -393,6 +532,7 @@ $("selNone").onclick = () => {
 
 function updateStartBtn() {
   $("startBtn").disabled = state.running || !state.source || !state.output || state.selected.size === 0;
+  updateSumBtn();
 }
 
 $("startBtn").onclick = async () => {
@@ -405,6 +545,9 @@ $("startBtn").onclick = async () => {
         force: $("force").checked,
         prompt: $("promptText").value,
         mode: currentMode(),
+        summary: $("sumNow").checked,
+        summary_template: $("sumTemplate").value,
+        summary_prompt: $("sumPrompt").value,
       }),
     });
   } catch (e) { alert("Не удалось запустить: " + e.message); }

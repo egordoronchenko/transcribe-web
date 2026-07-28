@@ -10,7 +10,7 @@ import time
 from collections import deque
 from pathlib import Path
 
-from . import gemini, media, merge
+from . import gemini, media, merge, summarize
 from .core import Config, TRANSCRIPTS_DIR, transcribe_one
 
 HOST_ROOT = Path("/host/root")
@@ -82,16 +82,22 @@ class JobManager:
             self.subscribers.remove(q)
 
     def start(self, source_rel: str, output_rel: str, files: list[str], force: bool,
-              prompt: str | None = None, mode: str = "whisper"):
+              prompt: str | None = None, mode: str = "whisper",
+              summary: bool = False, summary_template: str = "meeting",
+              summary_prompt: str | None = None, kind: str = "transcribe"):
         if self.running:
             raise RuntimeError("job already running")
-        stems = media.assign_stems(files)
+        stems = media.assign_stems(files) if kind == "transcribe" else {p: Path(p).name for p in files}
         self.state = {
             "status": "running",
+            "kind": kind,
             "source": source_rel,
             "output": output_rel,
             "force": force,
             "mode": mode if mode in MODES else "whisper",
+            "summary": bool(summary) or kind == "summary",
+            "summary_template": summary_template,
+            "summary_prompt": (summary_prompt or "").strip() or None,
             "prompt_override": (prompt or "").strip() or None,
             "started_at": now_iso(),
             "finished_at": None,
@@ -154,14 +160,60 @@ class JobManager:
                                         + g["meta"]["wall_clock_sec"]
                                         + m["meta"]["wall_clock_sec"], 2)}
 
+    def _summary_prompt(self, st) -> tuple[str, str]:
+        key = st.get("summary_template") or summarize.DEFAULT_TEMPLATE
+        tpl = summarize.TEMPLATES.get(key)
+        prompt = st.get("summary_prompt") or (tpl["prompt"] if tpl else "")
+        return key, prompt
+
+    async def _run_summary_only(self, cfg, output: Path):
+        """Second job kind: summarize transcripts that already exist on disk."""
+        st = self.state
+        key, prompt = self._summary_prompt(st)
+        base = output / TRANSCRIPTS_DIR
+        self.log(f"саммари по готовым расшифровкам: {len(st['files'])} шт., "
+                 f"модель {cfg.summary_model}, шаблон «{key}»")
+        for i, f in enumerate(st["files"]):
+            if self.cancel_soft:
+                f["status"] = "cancelled"
+                continue
+            st["current_index"] = i
+            file_dir = base / f["path"]
+            stem = f["stem"]
+            t0 = time.perf_counter()
+            if (file_dir / "summary" / f"{stem}.md").exists() and not st["force"]:
+                f["status"] = "skip"
+                self.log(f"skip (саммари есть): {f['path']}")
+                self.push_state()
+                continue
+            try:
+                f["status"] = "transcribing"
+                self.push_state()
+                self.log(f"файл {i + 1}/{len(st['files'])}: {f['path']}")
+                meta = await summarize.summarize_file(file_dir, stem, key, prompt, cfg, self.log)
+                f["status"] = "ok"
+                f["wall_clock_sec"] = meta["wall_clock_sec"]
+            except Exception as e:
+                f["status"] = "error"
+                f["error"] = str(e)[:500]
+                f["wall_clock_sec"] = round(time.perf_counter() - t0, 2)
+                self.log(f"ошибка: {f['path']} — {e}")
+            self.push_state()
+
     async def _run_inner(self):
         st = self.state
         cfg = Config.from_env()
-        if st.get("prompt_override") is not None and st["prompt_override"] != (cfg.prompt or ""):
-            cfg.prompt = st["prompt_override"]
-            self.log("подсказка распознавания изменена пользователем для этого задания")
+        override = st.get("prompt_override")
+        if override is not None and override != (cfg.prompt or ""):
+            cfg.prompt = override or None
+            self.log("подсказка распознавания: " + ("очищена (без подсказки)" if not override
+                                                    else "изменена пользователем для этого задания"))
         source = HOST_ROOT / st["source"]
         output = HOST_ROOT / st["output"]
+        if st.get("kind") == "summary":
+            await self._run_summary_only(cfg, output)
+            self._finish(cfg, output)
+            return
         mode = st.get("mode", "whisper")
         result_exts = MODE_FILES[mode]
         models = {"whisper": cfg.model, "gemini": cfg.gemini_model}.get(
@@ -226,6 +278,17 @@ class JobManager:
                 f["wall_clock_sec"] = meta["wall_clock_sec"]
                 f["audio_duration_sec"] = meta["audio_duration_sec"]
                 self.log(f"готово: {f['path']} за {meta['wall_clock_sec']:.0f} с")
+
+                if st.get("summary"):
+                    key, sprompt = self._summary_prompt(st)
+                    try:
+                        smeta = await summarize.summarize_file(
+                            out_dir, stem, key, sprompt, cfg, self.log)
+                        f["wall_clock_sec"] = round(
+                            f["wall_clock_sec"] + smeta["wall_clock_sec"], 2)
+                    except Exception as e:
+                        f["summary_error"] = str(e)[:300]
+                        self.log(f"саммари не сделано: {f['path']} — {e}")
             except media.NoAudioError as e:
                 f["status"] = "no_audio"
                 f["error"] = str(e)
@@ -237,6 +300,11 @@ class JobManager:
                 self.log(f"ошибка: {f['path']} — {e}")
             self.push_state()
 
+        self._finish(cfg, output)
+
+    def _finish(self, cfg: Config, output: Path):
+        """Общий финал для обоих видов заданий: статус, отчёт, событие в интерфейс."""
+        st = self.state
         st["current_index"] = None
         st["finished_at"] = now_iso()
         counts = {}
@@ -260,8 +328,12 @@ class JobManager:
             "status": st["status"],
             "source": f"/host/root/{st['source']}",
             "output": f"/host/root/{st['output']}/{TRANSCRIPTS_DIR}",
+            "kind": st.get("kind", "transcribe"),
             "mode": st.get("mode", "whisper"),
             "model": cfg.gemini_model if st.get("mode") == "gemini" else cfg.model,
+            "summary": st.get("summary", False),
+            "summary_model": cfg.summary_model if st.get("summary") else None,
+            "summary_template": st.get("summary_template") if st.get("summary") else None,
             "language": cfg.language,
             "force": st["force"],
             "files": [

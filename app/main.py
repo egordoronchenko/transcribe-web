@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
-from . import media
+from . import media, summarize
 from .jobs import HOST_ROOT, manager
 
 app = FastAPI(title="transcribe-web")
@@ -38,6 +38,9 @@ def status():
         "key_present": len(key) > 0,
         "model": os.environ.get("WHISPER_MODEL", "openai/whisper-large-v3"),
         "gemini_model": os.environ.get("GEMINI_MODEL", "google/gemini-2.5-flash"),
+        "summary_model": os.environ.get("SUMMARY_MODEL", "deepseek/deepseek-v4-flash"),
+        "summary_templates": {k: {"title": v["title"], "prompt": v["prompt"]}
+                              for k, v in summarize.TEMPLATES.items()},
         "language": os.environ.get("LANGUAGE", "ru"),
         "prompt_default": Config.from_env().prompt or "",
         "running": manager.running,
@@ -81,6 +84,9 @@ class JobRequest(BaseModel):
     force: bool = False
     prompt: str | None = None
     mode: str = "whisper"
+    summary: bool = False
+    summary_template: str = "meeting"
+    summary_prompt: str | None = None
 
 
 @app.post("/api/job")
@@ -100,7 +106,40 @@ async def start_job(req: JobRequest):
         if not (src / rp).is_file():
             raise HTTPException(400, f"файл не найден: {rp}")
     manager.start(req.source, req.output, req.files, req.force,
-                  prompt=req.prompt, mode=req.mode)
+                  prompt=req.prompt, mode=req.mode, summary=req.summary,
+                  summary_template=req.summary_template, summary_prompt=req.summary_prompt)
+    return {"ok": True}
+
+
+@app.get("/api/transcripts")
+def transcripts(path: str = ""):
+    """Готовые расшифровки в выходной папке — их можно суммаризировать отдельно."""
+    p = resolve_rel(path)
+    if not p.is_dir():
+        raise HTTPException(404, "not a directory")
+    return {"path": path, "files": summarize.scan_transcripts(p)}
+
+
+class SummaryRequest(BaseModel):
+    output: str
+    files: list[str]
+    force: bool = False
+    summary_template: str = "meeting"
+    summary_prompt: str | None = None
+
+
+@app.post("/api/summary")
+async def start_summary(req: SummaryRequest):
+    if manager.running:
+        raise HTTPException(409, "задание уже выполняется")
+    if not (os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENAI_API_KEY")):
+        raise HTTPException(400, "OPENROUTER_API_KEY не задан (.env)")
+    if not req.files:
+        raise HTTPException(400, "не выбрано ни одной расшифровки")
+    resolve_rel(req.output)
+    manager.start(req.output, req.output, req.files, req.force,
+                  summary=True, summary_template=req.summary_template,
+                  summary_prompt=req.summary_prompt, kind="summary")
     return {"ok": True}
 
 
