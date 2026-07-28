@@ -107,9 +107,10 @@ def write_merged(
 
     text = to_text(segments)
     srt = to_srt([{**s, "text": f"[{s['speaker']}] {s['text']}"} for s in segments])
+    out_dir = out_dir / suffix
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / f"{stem}.{suffix}.txt").write_text(text, encoding="utf-8")
-    (out_dir / f"{stem}.{suffix}.srt").write_text(srt, encoding="utf-8")
+    (out_dir / f"{stem}.txt").write_text(text, encoding="utf-8")
+    (out_dir / f"{stem}.srt").write_text(srt, encoding="utf-8")
     payload = {
         "mode": suffix,
         "built_from": {"timings": cfg.model, "speakers": cfg.gemini_model},
@@ -120,7 +121,7 @@ def write_merged(
         "segments": segments,
         "text": text,
     }
-    (out_dir / f"{stem}.{suffix}.json").write_text(
+    (out_dir / f"{stem}.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     meta = {
         "success": True,
@@ -134,6 +135,6 @@ def write_merged(
         "speakers": len(speakers),
         "text_match": round(coverage, 3),
     }
-    (out_dir / f"{stem}.{suffix}.meta.json").write_text(
+    (out_dir / f"{stem}.meta.json").write_text(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     return {"meta": meta, "segments": segments, "speakers": speakers}

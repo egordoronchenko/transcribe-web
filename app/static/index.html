@@ -157,7 +157,7 @@
       <button id="outBtn">Выбрать</button>
     </div>
     <div id="outBrowser" class="browser hidden"></div>
-    <div class="hint">в выходной папке будет создана папка transcripts: внутри — подпапка на каждый файл со всеми его результатами; структура подпапок источника сохраняется</div>
+    <div class="hint">в выходной папке будет создана папка transcripts: внутри — подпапка на каждый файл, а в ней подпапка на каждую модель (whisper/, gemini/, merged/); структура подпапок источника сохраняется</div>
   </div>
 
   <div class="card">
@@ -173,7 +173,7 @@
       </label>
       <label class="mode" id="modeBothLbl">
         <input type="radio" name="mode" value="both"><b>Оба — два комплекта</b>
-        <span>файлы .whisper.* и .gemini.* рядом, ничего не перетирается · цена суммируется</span>
+        <span>результаты в подпапках whisper/ и gemini/, ничего не перетирается · цена суммируется</span>
       </label>
       <label class="mode" id="modeMergedLbl">
         <input type="radio" name="mode" value="merged"><b>Слияние — лучшее из двух</b>

@@ -47,7 +47,7 @@ async def run(src: Path, out: Path, force: bool, mode: str = "whisper") -> int:
         rel = f["path"]
         stem = stems[rel]
         out_dir = out / TRANSCRIPTS_DIR / Path(rel).parent / stem
-        if all((out_dir / f"{stem}{ext}").exists() for ext in result_exts) and not force:
+        if all((out_dir / sub / f"{stem}{ext}").exists() for sub, ext in result_exts) and not force:
             log(f"[{i + 1}/{len(files)}] skip: {rel}")
             continue
         log(f"[{i + 1}/{len(files)}] {rel}")

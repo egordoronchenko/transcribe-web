@@ -144,6 +144,10 @@ async def call_gemini(
             {"type": "input_audio", "input_audio": {"data": audio, "format": "mp3"}},
         ]}],
     }
+    if "openrouter" in cfg.base_url.lower():
+        # роутер может отдать запрос провайдеру, который молча игнорирует схему —
+        # без неё модель ломает JSON кавычками прямой речи
+        body["provider"] = {"require_parameters": True}
     last = ""
     for attempt in range(attempts):
         try:
@@ -238,8 +242,9 @@ async def transcribe_one(
                 await on_progress(i + 1, len(plan))
 
     text = to_text(segments)
+    out_dir = out_dir / suffix
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / f"{stem}.{suffix}.txt").write_text(text, encoding="utf-8")
+    (out_dir / f"{stem}.txt").write_text(text, encoding="utf-8")
     payload = {
         "mode": suffix,
         "model": cfg.gemini_model,
@@ -250,7 +255,7 @@ async def transcribe_one(
         "segments": segments,
         "text": text,
     }
-    (out_dir / f"{stem}.{suffix}.json").write_text(
+    (out_dir / f"{stem}.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     meta = {
         "success": True,
@@ -263,7 +268,7 @@ async def transcribe_one(
         "speakers": len(speakers),
         "source_audio": str(audio_path),
     }
-    (out_dir / f"{stem}.{suffix}.meta.json").write_text(
+    (out_dir / f"{stem}.meta.json").write_text(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     return {"meta": meta, "segments": segments,
             "speakers": [{"id": k, "description": v} for k, v in sorted(speakers.items())]}

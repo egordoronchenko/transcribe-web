@@ -184,8 +184,10 @@ async def transcribe_one(
     log: Callable[[str], None] = lambda s: None,
     suffix: str = "whisper",
 ) -> dict:
-    """Transcribe one prepared mp3. Writes <stem>.<suffix>.txt/.srt/.json/.meta.json.
+    """Transcribe one prepared mp3. Writes <suffix>/<stem>.txt/.srt/.json/.meta.json.
 
+    Each mode gets its own subfolder, so results of different models never
+    collide and it is obvious in a file manager which model produced what.
     Returns {"meta": ..., "segments": [...]} — segments are handed to the merge
     step when both backends run over the same file.
     """
@@ -213,9 +215,10 @@ async def transcribe_one(
     segments = stitch_segments(results, OVERLAP_SEC)
     text = "\n".join(s["text"] for s in segments if s["text"]).strip() + "\n"
 
+    out_dir = out_dir / suffix
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / f"{stem}.{suffix}.txt").write_text(text, encoding="utf-8")
-    (out_dir / f"{stem}.{suffix}.srt").write_text(to_srt(segments), encoding="utf-8")
+    (out_dir / f"{stem}.txt").write_text(text, encoding="utf-8")
+    (out_dir / f"{stem}.srt").write_text(to_srt(segments), encoding="utf-8")
     payload = {
         "mode": suffix,
         "model": cfg.model,
@@ -228,7 +231,7 @@ async def transcribe_one(
         "prompt_used": bool(cfg.prompt),
         "polished": False,
     }
-    (out_dir / f"{stem}.{suffix}.json").write_text(
+    (out_dir / f"{stem}.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     meta = {
         "success": True,
@@ -240,6 +243,6 @@ async def transcribe_one(
         "segments": len(segments),
         "source_audio": str(audio_path),
     }
-    (out_dir / f"{stem}.{suffix}.meta.json").write_text(
+    (out_dir / f"{stem}.meta.json").write_text(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     return {"meta": meta, "segments": segments}

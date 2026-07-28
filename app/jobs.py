@@ -17,12 +17,14 @@ HOST_ROOT = Path("/host/root")
 
 MODES = ("whisper", "gemini", "both", "merged")
 
-# какие файлы должны быть на месте, чтобы считать файл уже обработанным (resume)
+# какие файлы должны быть на месте, чтобы считать файл уже обработанным (resume);
+# каждый режим кладёт результат в свою подпапку
 MODE_FILES = {
-    "whisper": (".whisper.txt", ".whisper.srt", ".whisper.json"),
-    "gemini": (".gemini.txt", ".gemini.json"),
-    "both": (".whisper.txt", ".whisper.srt", ".whisper.json", ".gemini.txt", ".gemini.json"),
-    "merged": (".merged.txt", ".merged.srt", ".merged.json"),
+    "whisper": (("whisper", ".txt"), ("whisper", ".srt"), ("whisper", ".json")),
+    "gemini": (("gemini", ".txt"), ("gemini", ".json")),
+    "both": (("whisper", ".txt"), ("whisper", ".srt"), ("whisper", ".json"),
+             ("gemini", ".txt"), ("gemini", ".json")),
+    "merged": (("merged", ".txt"), ("merged", ".srt"), ("merged", ".json")),
 }
 
 MODE_LABELS = {
@@ -178,7 +180,7 @@ class JobManager:
             out_dir = output / TRANSCRIPTS_DIR / rel_dir / stem
             t0 = time.perf_counter()
 
-            existing = [out_dir / f"{stem}{ext}" for ext in result_exts]
+            existing = [out_dir / sub / f"{stem}{ext}" for sub, ext in result_exts]
             if all(p.exists() for p in existing) and not st["force"]:
                 f["status"] = "skip"
                 self.log(f"skip (готово): {f['path']}")
