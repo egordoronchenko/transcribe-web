@@ -171,6 +171,14 @@
         <input type="radio" name="mode" value="gemini"><b>Gemini — с говорящими</b>
         <span>реплики помечены S1, S2, S3 · таймкоды приблизительные, .srt не создаётся</span>
       </label>
+      <label class="mode" id="modeBothLbl">
+        <input type="radio" name="mode" value="both"><b>Оба — два комплекта</b>
+        <span>файлы .whisper.* и .gemini.* рядом, ничего не перетирается · цена суммируется</span>
+      </label>
+      <label class="mode" id="modeMergedLbl">
+        <input type="radio" name="mode" value="merged"><b>Слияние — лучшее из двух</b>
+        <span>точные таймкоды Whisper + говорящие Gemini, сведённые по тексту · .srt с метками</span>
+      </label>
     </div>
     <div class="hint" id="modeHint"></div>
   </div>
@@ -272,13 +280,18 @@ $("promptReset").onclick = () => { $("promptText").value = promptDefault; update
 
 const currentMode = () => document.querySelector('input[name="mode"]:checked').value;
 let models = { whisper: "", gemini: "" };
+const MODE_HINTS = {
+  whisper: () => "модель " + models.whisper + " · на записях с плохим звуком может терять фрагменты",
+  gemini: () => "модель " + models.gemini + " · записи длиннее 30 минут режутся на части, между частями нумерация говорящих может разойтись",
+  both: () => "запись обрабатывается дважды: " + models.whisper + " и " + models.gemini + " · результаты лежат рядом, выбираешь потом сам",
+  merged: () => "запись обрабатывается дважды, затем тексты сводятся по совпадению слов · в json попадает доля совпадения: чем ниже, тем осторожнее с метками",
+};
 function updateMode() {
   const m = currentMode();
-  $("modeWhisperLbl").classList.toggle("sel", m === "whisper");
-  $("modeGeminiLbl").classList.toggle("sel", m === "gemini");
-  $("modeHint").textContent = m === "gemini"
-    ? "модель " + models.gemini + " · записи длиннее 30 минут режутся на части, между частями нумерация говорящих может разойтись"
-    : "модель " + models.whisper + " · на записях с плохим звуком может терять фрагменты";
+  for (const [k, id] of Object.entries({ whisper: "modeWhisperLbl", gemini: "modeGeminiLbl",
+                                         both: "modeBothLbl", merged: "modeMergedLbl" }))
+    $(id).classList.toggle("sel", m === k);
+  $("modeHint").textContent = MODE_HINTS[m]();
 }
 document.querySelectorAll('input[name="mode"]').forEach(r => r.addEventListener("change", updateMode));
 

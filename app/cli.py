@@ -11,7 +11,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from . import gemini, media
+from . import gemini, media, merge
 from .core import Config, TRANSCRIPTS_DIR, transcribe_one
 
 
@@ -20,9 +20,20 @@ def log(line: str):
 
 
 async def run(src: Path, out: Path, force: bool, mode: str = "whisper") -> int:
+    from .jobs import MODE_FILES
+
     cfg = Config.from_env()
-    run_one = gemini.transcribe_one if mode == "gemini" else transcribe_one
-    result_exts = (".txt", ".json") if mode == "gemini" else (".txt", ".srt", ".json")
+    result_exts = MODE_FILES[mode]
+
+    async def run_mode(audio, out_dir, stem, tmp):
+        w = g = None
+        if mode in ("whisper", "both", "merged"):
+            w = await transcribe_one(audio, out_dir, stem, cfg, tmp, log=log)
+        if mode in ("gemini", "both", "merged"):
+            g = await gemini.transcribe_one(audio, out_dir, stem, cfg, tmp, log=log)
+        if mode == "merged":
+            return merge.write_merged(out_dir, stem, w, g, cfg, log=log)["meta"]
+        return (g or w)["meta"]
     if not cfg.api_key:
         print("OPENROUTER_API_KEY не задан", file=sys.stderr)
         return 2
@@ -43,7 +54,7 @@ async def run(src: Path, out: Path, force: bool, mode: str = "whisper") -> int:
         try:
             audio = media.ensure_audio(src / rel, out_dir, stem, force, log)
             with tempfile.TemporaryDirectory(prefix="chunks_") as tmp:
-                meta = await run_one(audio, out_dir, stem, cfg, Path(tmp), log=log)
+                meta = await run_mode(audio, out_dir, stem, Path(tmp))
             log(f"  готово за {meta['wall_clock_sec']:.0f} с")
         except media.NoAudioError as e:
             log(f"  {e} — пропускаю")
@@ -58,8 +69,9 @@ def main():
     p.add_argument("--in", dest="src", required=True)
     p.add_argument("--out", dest="out", required=True)
     p.add_argument("--force", action="store_true")
-    p.add_argument("--mode", choices=("whisper", "gemini"), default="whisper",
-                   help="whisper — дословно без говорящих; gemini — с разделением говорящих")
+    p.add_argument("--mode", choices=("whisper", "gemini", "both", "merged"), default="whisper",
+                   help="whisper — дословно; gemini — с говорящими; both — оба комплекта; "
+                        "merged — тайминги Whisper + говорящие Gemini")
     args = p.parse_args()
     sys.exit(asyncio.run(run(Path(args.src), Path(args.out), args.force, args.mode)))
 

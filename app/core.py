@@ -182,8 +182,13 @@ async def transcribe_one(
     work_dir: Path,
     on_progress: Callable[[int, int], Awaitable[None]] | None = None,
     log: Callable[[str], None] = lambda s: None,
+    suffix: str = "whisper",
 ) -> dict:
-    """Transcribe one prepared mp3 file. Writes <stem>.txt/.srt/.json/.meta.json in out_dir."""
+    """Transcribe one prepared mp3. Writes <stem>.<suffix>.txt/.srt/.json/.meta.json.
+
+    Returns {"meta": ..., "segments": [...]} — segments are handed to the merge
+    step when both backends run over the same file.
+    """
     t0 = time.perf_counter()
     log(f"чанкую {audio_path.name}")
     infos, duration_sec = await asyncio.to_thread(prepare_chunks, audio_path, work_dir)
@@ -209,9 +214,10 @@ async def transcribe_one(
     text = "\n".join(s["text"] for s in segments if s["text"]).strip() + "\n"
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / f"{stem}.txt").write_text(text, encoding="utf-8")
-    (out_dir / f"{stem}.srt").write_text(to_srt(segments), encoding="utf-8")
+    (out_dir / f"{stem}.{suffix}.txt").write_text(text, encoding="utf-8")
+    (out_dir / f"{stem}.{suffix}.srt").write_text(to_srt(segments), encoding="utf-8")
     payload = {
+        "mode": suffix,
         "model": cfg.model,
         "language": cfg.language,
         "segments": segments,
@@ -222,9 +228,11 @@ async def transcribe_one(
         "prompt_used": bool(cfg.prompt),
         "polished": False,
     }
-    (out_dir / f"{stem}.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    (out_dir / f"{stem}.{suffix}.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     meta = {
         "success": True,
+        "mode": suffix,
         "wall_clock_sec": round(time.perf_counter() - t0, 2),
         "audio_duration_sec": round(duration_sec, 2),
         "model": cfg.model,
@@ -232,5 +240,6 @@ async def transcribe_one(
         "segments": len(segments),
         "source_audio": str(audio_path),
     }
-    (out_dir / f"{stem}.meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-    return meta
+    (out_dir / f"{stem}.{suffix}.meta.json").write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"meta": meta, "segments": segments}

@@ -190,6 +190,7 @@ async def transcribe_one(
     work_dir: Path,
     on_progress: Callable[[int, int], Awaitable[None]] | None = None,
     log: Callable[[str], None] = lambda s: None,
+    suffix: str = "gemini",
 ) -> dict:
     t0 = time.perf_counter()
     duration = await asyncio.to_thread(audio_duration, audio_path)
@@ -238,9 +239,9 @@ async def transcribe_one(
 
     text = to_text(segments)
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / f"{stem}.txt").write_text(text, encoding="utf-8")
+    (out_dir / f"{stem}.{suffix}.txt").write_text(text, encoding="utf-8")
     payload = {
-        "mode": "gemini",
+        "mode": suffix,
         "model": cfg.gemini_model,
         "language": cfg.language,
         "timestamps": "приблизительные: модель оценивает время сама, к концу записи расхождение растёт",
@@ -249,10 +250,11 @@ async def transcribe_one(
         "segments": segments,
         "text": text,
     }
-    (out_dir / f"{stem}.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    (out_dir / f"{stem}.{suffix}.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     meta = {
         "success": True,
-        "mode": "gemini",
+        "mode": suffix,
         "wall_clock_sec": round(time.perf_counter() - t0, 2),
         "audio_duration_sec": round(duration, 2),
         "model": cfg.gemini_model,
@@ -261,5 +263,7 @@ async def transcribe_one(
         "speakers": len(speakers),
         "source_audio": str(audio_path),
     }
-    (out_dir / f"{stem}.meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-    return meta
+    (out_dir / f"{stem}.{suffix}.meta.json").write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"meta": meta, "segments": segments,
+            "speakers": [{"id": k, "description": v} for k, v in sorted(speakers.items())]}

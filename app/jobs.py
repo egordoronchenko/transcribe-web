@@ -10,10 +10,27 @@ import time
 from collections import deque
 from pathlib import Path
 
-from . import gemini, media
+from . import gemini, media, merge
 from .core import Config, TRANSCRIPTS_DIR, transcribe_one
 
 HOST_ROOT = Path("/host/root")
+
+MODES = ("whisper", "gemini", "both", "merged")
+
+# какие файлы должны быть на месте, чтобы считать файл уже обработанным (resume)
+MODE_FILES = {
+    "whisper": (".whisper.txt", ".whisper.srt", ".whisper.json"),
+    "gemini": (".gemini.txt", ".gemini.json"),
+    "both": (".whisper.txt", ".whisper.srt", ".whisper.json", ".gemini.txt", ".gemini.json"),
+    "merged": (".merged.txt", ".merged.srt", ".merged.json"),
+}
+
+MODE_LABELS = {
+    "whisper": "Whisper (дословно)",
+    "gemini": "Gemini (с говорящими)",
+    "both": "оба режима",
+    "merged": "слияние (тайминги Whisper + говорящие Gemini)",
+}
 
 
 def now_iso() -> str:
@@ -72,7 +89,7 @@ class JobManager:
             "source": source_rel,
             "output": output_rel,
             "force": force,
-            "mode": mode if mode in ("whisper", "gemini") else "whisper",
+            "mode": mode if mode in MODES else "whisper",
             "prompt_override": (prompt or "").strip() or None,
             "started_at": now_iso(),
             "finished_at": None,
@@ -109,6 +126,32 @@ class JobManager:
             self.log(f"внутренняя ошибка задания: {e!r}")
             self.push_state()
 
+    async def _run_mode(self, mode, audio_path, out_dir, stem, cfg, work_dir, on_progress) -> dict:
+        """Runs the backend(s) the mode needs and returns the meta to report."""
+        if mode in ("whisper", "both", "merged"):
+            if mode != "whisper":
+                self.log("шаг 1: Whisper — дословный текст и точные тайминги")
+            w = await transcribe_one(audio_path, out_dir, stem, cfg, work_dir,
+                                     on_progress=on_progress, log=self.log)
+        if mode in ("gemini", "both", "merged"):
+            if mode != "gemini":
+                self.log("шаг 2: Gemini — разделение говорящих")
+            g = await gemini.transcribe_one(audio_path, out_dir, stem, cfg, work_dir,
+                                            on_progress=on_progress, log=self.log)
+        if mode == "whisper":
+            return w["meta"]
+        if mode == "gemini":
+            return g["meta"]
+        if mode == "both":
+            return {**w["meta"], "mode": "both",
+                    "wall_clock_sec": round(w["meta"]["wall_clock_sec"] + g["meta"]["wall_clock_sec"], 2)}
+        self.log("шаг 3: свожу тайминги и говорящих по совпадению текста")
+        m = merge.write_merged(out_dir, stem, w, g, cfg, log=self.log)
+        return {**m["meta"],
+                "wall_clock_sec": round(w["meta"]["wall_clock_sec"]
+                                        + g["meta"]["wall_clock_sec"]
+                                        + m["meta"]["wall_clock_sec"], 2)}
+
     async def _run_inner(self):
         st = self.state
         cfg = Config.from_env()
@@ -117,12 +160,12 @@ class JobManager:
             self.log("подсказка распознавания изменена пользователем для этого задания")
         source = HOST_ROOT / st["source"]
         output = HOST_ROOT / st["output"]
-        gemini_mode = st.get("mode") == "gemini"
-        run_one = gemini.transcribe_one if gemini_mode else transcribe_one
-        result_exts = (".txt", ".json") if gemini_mode else (".txt", ".srt", ".json")
-        self.log(f"задание: {len(st['files'])} файлов, режим "
-                 f"{'Gemini (с говорящими)' if gemini_mode else 'Whisper (дословно)'}, "
-                 f"модель {cfg.gemini_model if gemini_mode else cfg.model}, язык {cfg.language}")
+        mode = st.get("mode", "whisper")
+        result_exts = MODE_FILES[mode]
+        models = {"whisper": cfg.model, "gemini": cfg.gemini_model}.get(
+            mode, f"{cfg.model} + {cfg.gemini_model}")
+        self.log(f"задание: {len(st['files'])} файлов, режим {MODE_LABELS[mode]}, "
+                 f"модель {models}, язык {cfg.language}")
 
         for i, f in enumerate(st["files"]):
             if self.cancel_soft:
@@ -159,10 +202,8 @@ class JobManager:
                     self.push_state()
 
                 with tempfile.TemporaryDirectory(prefix="chunks_") as tmp:
-                    work = asyncio.create_task(run_one(
-                        audio_path, out_dir, stem, cfg, Path(tmp),
-                        on_progress=on_progress, log=self.log,
-                    ))
+                    work = asyncio.create_task(self._run_mode(
+                        mode, audio_path, out_dir, stem, cfg, Path(tmp), on_progress))
                     hard_cancel = asyncio.create_task(self.cancel_hard_event.wait())
                     done_set, _ = await asyncio.wait(
                         {work, hard_cancel}, return_when=asyncio.FIRST_COMPLETED
